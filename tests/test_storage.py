@@ -189,16 +189,16 @@ class TestStorage(unittest.TestCase):
 
             indexes = self._list_sqlite_indexes(db_path, "decision_signals")
             self.assertEqual(
-                indexes.get("ix_decision_signals_decision_profile"),
+                indexes.get("ix_ds_decision_profile"),
                 ["decision_profile"],
             )
             self.assertEqual(
-                indexes.get("ix_decision_signal_market_stock_profile_created"),
+                indexes.get("ix_ds_mkt_stock_profile_created"),
                 ["market", "stock_code", "decision_profile", "created_at"],
             )
             self.assertEqual(
                 indexes.get(
-                    "ix_decision_signal_report_type_market_stock_profile_action_horizon_phase"
+                    "ix_ds_report_mkt_stock_profile_phase"
                 ),
                 [
                     "source_report_id", "source_type", "market", "stock_code",
@@ -207,7 +207,7 @@ class TestStorage(unittest.TestCase):
             )
             self.assertEqual(
                 indexes.get(
-                    "ix_decision_signal_trace_type_market_stock_profile_action_horizon_phase"
+                    "ix_ds_trace_mkt_stock_profile_phase"
                 ),
                 [
                     "trace_id", "source_type", "market", "stock_code",
@@ -243,12 +243,12 @@ class TestStorage(unittest.TestCase):
                 )"""
                 )
                 conn.execute(
-                    "CREATE INDEX ix_decision_signal_report_type_market_stock_action_horizon_phase "
+                    "CREATE INDEX ix_ds_report_mkt_stock_action_phase "
                     "ON decision_signals "
                     "(source_report_id, source_type, market, stock_code, action, horizon, market_phase)"
                 )
                 conn.execute(
-                    "CREATE INDEX ix_decision_signal_trace_type_market_stock_action_horizon_phase "
+                    "CREATE INDEX ix_ds_trace_mkt_stock_action_phase "
                     "ON decision_signals "
                     "(trace_id, source_type, market, stock_code, action, horizon, market_phase)"
                 )
@@ -300,15 +300,15 @@ class TestStorage(unittest.TestCase):
 
             indexes = self._list_sqlite_indexes(db_path, "decision_signals")
             expected_indexes = {
-                "ix_decision_signals_decision_profile": ["decision_profile"],
-                "ix_decision_signal_market_stock_profile_created": [
+                "ix_ds_decision_profile": ["decision_profile"],
+                "ix_ds_mkt_stock_profile_created": [
                     "market", "stock_code", "decision_profile", "created_at",
                 ],
-                "ix_decision_signal_report_type_market_stock_profile_action_horizon_phase": [
+                "ix_ds_report_mkt_stock_profile_phase": [
                     "source_report_id", "source_type", "market", "stock_code",
                     "decision_profile", "action", "horizon", "market_phase",
                 ],
-                "ix_decision_signal_trace_type_market_stock_profile_action_horizon_phase": [
+                "ix_ds_trace_mkt_stock_profile_phase": [
                     "trace_id", "source_type", "market", "stock_code",
                     "decision_profile", "action", "horizon", "market_phase",
                 ],
@@ -316,14 +316,14 @@ class TestStorage(unittest.TestCase):
             for index_name, index_columns in expected_indexes.items():
                 self.assertEqual(indexes.get(index_name), index_columns)
             self.assertEqual(
-                indexes.get("ix_decision_signal_report_type_market_stock_action_horizon_phase"),
+                indexes.get("ix_ds_report_mkt_stock_action_phase"),
                 [
                     "source_report_id", "source_type", "market", "stock_code",
                     "action", "horizon", "market_phase",
                 ],
             )
             self.assertEqual(
-                indexes.get("ix_decision_signal_trace_type_market_stock_action_horizon_phase"),
+                indexes.get("ix_ds_trace_mkt_stock_action_phase"),
                 [
                     "trace_id", "source_type", "market", "stock_code",
                     "action", "horizon", "market_phase",

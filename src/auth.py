@@ -56,9 +56,9 @@ def _ensure_env_loaded() -> None:
 
 
 def _get_data_dir() -> Path:
-    """Return DATA_DIR as parent of DATABASE_PATH."""
-    db_path = os.getenv("DATABASE_PATH", "./data/stock_analysis.db")
-    return Path(db_path).resolve().parent
+    """Return DATA_DIR (falls back to parent of DATABASE_PATH)."""
+    from src.config import get_config
+    return get_config().get_data_dir()
 
 
 def _get_credential_path() -> Path:

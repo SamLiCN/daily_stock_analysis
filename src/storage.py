@@ -1024,7 +1024,7 @@ class DecisionSignalRecord(Base):
         Index('ix_decision_signal_stock_status_time', 'stock_code', 'status', 'created_at'),
         Index('ix_decision_signal_market_status_time', 'market', 'status', 'created_at'),
         Index(
-            'ix_decision_signal_report_type_market_stock_action_horizon_phase',
+            'ix_ds_report_mkt_stock_action_phase',
             'source_report_id',
             'source_type',
             'market',
@@ -1034,7 +1034,7 @@ class DecisionSignalRecord(Base):
             'market_phase',
         ),
         Index(
-            'ix_decision_signal_trace_type_market_stock_action_horizon_phase',
+            'ix_ds_trace_mkt_stock_action_phase',
             'trace_id',
             'source_type',
             'market',
@@ -1044,7 +1044,7 @@ class DecisionSignalRecord(Base):
             'market_phase',
         ),
         Index(
-            'ix_decision_signal_report_type_market_stock_profile_action_horizon_phase',
+            'ix_ds_report_mkt_stock_profile_phase',
             'source_report_id',
             'source_type',
             'market',
@@ -1055,7 +1055,7 @@ class DecisionSignalRecord(Base):
             'market_phase',
         ),
         Index(
-            'ix_decision_signal_trace_type_market_stock_profile_action_horizon_phase',
+            'ix_ds_trace_mkt_stock_profile_phase',
             'trace_id',
             'source_type',
             'market',
@@ -1066,7 +1066,7 @@ class DecisionSignalRecord(Base):
             'market_phase',
         ),
         Index(
-            'ix_decision_signal_market_stock_profile_created',
+            'ix_ds_mkt_stock_profile_created',
             'market',
             'stock_code',
             'decision_profile',
@@ -1178,18 +1178,29 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 db_url = config.get_db_url()
 
             self._db_url = db_url
+            is_sqlite = str(db_url).startswith("sqlite:")
             self._sqlite_wal_enabled = config.sqlite_wal_enabled
             self._sqlite_busy_timeout_ms = config.sqlite_busy_timeout_ms
             self._sqlite_write_retry_max = config.sqlite_write_retry_max
             self._sqlite_write_retry_base_delay = config.sqlite_write_retry_base_delay
+            self._pg_write_retry_max = config.pg_write_retry_max
+            self._postgres_schema = config.postgres_schema or "dsa"
 
             engine_kwargs = {
                 "echo": False,
                 "pool_pre_ping": True,
             }
-            if str(db_url).startswith("sqlite:") and self._sqlite_busy_timeout_ms > 0:
+            if is_sqlite and self._sqlite_busy_timeout_ms > 0:
                 engine_kwargs["connect_args"] = {
                     "timeout": self._sqlite_busy_timeout_ms / 1000,
+                }
+            else:
+                # PostgreSQL / 其他服务端数据库：显式连接池与超时调优
+                engine_kwargs["pool_size"] = config.pg_pool_size
+                engine_kwargs["max_overflow"] = config.pg_max_overflow
+                engine_kwargs["pool_recycle"] = config.pg_pool_recycle
+                engine_kwargs["connect_args"] = {
+                    "connect_timeout": config.pg_connect_timeout,
                 }
 
             # 创建数据库引擎
@@ -1202,12 +1213,23 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._sqlite_file_db = self._is_sqlite_engine and self._is_file_sqlite_database()
             self._install_sqlite_pragma_handler()
 
+            # 表命名空间：PostgreSQL 下统一放入配置指定的 schema（如 dsa），
+            # SQLite 下不加 schema。在 create_all 之前设置，确保 DDL 落到正确位置。
+            target_schema = None if self._is_sqlite_engine else self._postgres_schema
+            for _t in Base.metadata.tables.values():
+                _t.schema = target_schema
+
             # 创建 Session 工厂
             self._SessionLocal = sessionmaker(
                 bind=self._engine,
                 autocommit=False,
                 autoflush=False,
             )
+
+            if not self._is_sqlite_engine:
+                # 确保目标 schema 存在（如 dsa）
+                with self._engine.begin() as _conn:
+                    _conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {self._postgres_schema}"))
 
             # 创建所有表
             Base.metadata.create_all(self._engine)
@@ -1216,6 +1238,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._ensure_intelligence_item_scope_values()
             self._ensure_schema_migration_record()
             self._ensure_intelligence_items_unique_index()
+            if not self._is_sqlite_engine:
+                self._ensure_decision_signal_profile_indexes_pg()
 
             self._initialized = True
             logger.info(f"数据库初始化完成: {db_url}")
@@ -1300,15 +1324,15 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         """Create profile-aware indexes without dropping legacy indexes."""
 
         expected_indexes = {
-            "ix_decision_signals_decision_profile": ["decision_profile"],
-            "ix_decision_signal_market_stock_profile_created": [
+            "ix_ds_decision_profile": ["decision_profile"],
+            "ix_ds_mkt_stock_profile_created": [
                 "market", "stock_code", "decision_profile", "created_at",
             ],
-            "ix_decision_signal_report_type_market_stock_profile_action_horizon_phase": [
+            "ix_ds_report_mkt_stock_profile_phase": [
                 "source_report_id", "source_type", "market", "stock_code",
                 "decision_profile", "action", "horizon", "market_phase",
             ],
-            "ix_decision_signal_trace_type_market_stock_profile_action_horizon_phase": [
+            "ix_ds_trace_mkt_stock_profile_phase": [
                 "trace_id", "source_type", "market", "stock_code",
                 "decision_profile", "action", "horizon", "market_phase",
             ],
@@ -1332,6 +1356,34 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     "decision_profile index verification failed: "
                     f"index={index_name} expected={expected_columns} "
                     f"actual={actual_indexes.get(index_name)}"
+                )
+
+    def _ensure_decision_signal_profile_indexes_pg(self) -> None:
+        """PostgreSQL 下创建 decision_signals 的 profile 相关索引。
+
+        SQLite 走 _ensure_decision_signal_profile_indexes；PG 下 search_path
+        不一定包含目标 schema，因此用 schema 限定的 DDL 显式创建。
+        """
+        expected_indexes = {
+            "ix_ds_decision_profile": ["decision_profile"],
+            "ix_ds_mkt_stock_profile_created": [
+                "market", "stock_code", "decision_profile", "created_at",
+            ],
+            "ix_ds_report_mkt_stock_profile_phase": [
+                "source_report_id", "source_type", "market", "stock_code",
+                "decision_profile", "action", "horizon", "market_phase",
+            ],
+            "ix_ds_trace_mkt_stock_profile_phase": [
+                "trace_id", "source_type", "market", "stock_code",
+                "decision_profile", "action", "horizon", "market_phase",
+            ],
+        }
+        schema = self._postgres_schema or "dsa"
+        with self._engine.begin() as connection:
+            for index_name, columns in expected_indexes.items():
+                connection.exec_driver_sql(
+                    f"CREATE INDEX IF NOT EXISTS {index_name} "
+                    f"ON {schema}.decision_signals ({', '.join(columns)})"
                 )
 
     def _backfill_decision_signal_profile_from_metadata(self) -> None:
@@ -1681,7 +1733,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         operation_name: str,
         write_operation: Callable[[Session], T],
     ) -> T:
-        max_retries = self._sqlite_write_retry_max if self._is_sqlite_engine else 0
+        max_retries = self._sqlite_write_retry_max if self._is_sqlite_engine else self._pg_write_retry_max
 
         for attempt in range(max_retries + 1):
             session = self.get_session()
@@ -1697,13 +1749,13 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             except OperationalError as exc:
                 session.rollback()
                 if (
-                    self._is_sqlite_engine
-                    and self._is_sqlite_locked_error(exc)
+                    self._is_lock_error(exc)
                     and attempt < max_retries
                 ):
-                    delay = self._sqlite_write_retry_base_delay * (2 ** attempt)
+                    delay = (self._sqlite_write_retry_base_delay if self._is_sqlite_engine
+                             else 0.1) * (2 ** attempt)
                     logger.warning(
-                        "SQLite 写入锁冲突，准备重试: %s (%s/%s, %.2fs)",
+                        "数据库写入锁冲突，准备重试: %s (%s/%s, %.2fs)",
                         operation_name,
                         attempt + 1,
                         max_retries,
@@ -1720,7 +1772,8 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 session.close()
 
     @staticmethod
-    def _is_sqlite_locked_error(exc: OperationalError) -> bool:
+    def _is_lock_error(exc: OperationalError) -> bool:
+        """判断是否为数据库锁冲突（兼容 SQLite 与 PostgreSQL）。"""
         err_text = str(getattr(exc, "orig", exc)).lower()
         return any(
             token in err_text
@@ -1728,8 +1781,15 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "database is locked",
                 "database schema is locked",
                 "database table is locked",
+                # PostgreSQL
+                "deadlock detected",
+                "could not obtain lock",
+                "lock not available",
             )
         )
+
+    # 向后兼容别名（portfolio_repo 等旧调用点）
+    _is_sqlite_locked_error = _is_lock_error
 
     @staticmethod
     def _is_sqlite_duplicate_column_error(exc: OperationalError, column: str) -> bool:
@@ -3124,7 +3184,10 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "estimated_tokens": int(estimated_tokens or 0),
                 "updated_at": now,
             }
-            stmt = sqlite_insert(ConversationSummary).values(**values)
+            if self._is_sqlite_engine:
+                stmt = sqlite_insert(ConversationSummary).values(**values)
+            else:
+                stmt = pg_insert(ConversationSummary).values(**values)
             session.execute(
                 stmt.on_conflict_do_update(
                     index_elements=["session_id"],

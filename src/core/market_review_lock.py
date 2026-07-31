@@ -32,8 +32,7 @@ class MarketReviewExecutionLock:
 
 
 def market_review_lock_path(config: Config) -> Path:
-    database_path = getattr(config, "database_path", "./data/stock_analysis.db")
-    return Path(database_path).parent / "market_review.lock"
+    return config.get_data_dir() / "market_review.lock"
 
 
 def _write_market_review_lock_metadata(handle: Any) -> None:

@@ -26,3 +26,13 @@ skip = [".git", "__pycache__", ".env", "venv", ".venv"]
 [tool.bandit]
 exclude_dirs = ["tests", "test_*.py"]
 skips = ["B101"]  # assert 语句在测试中是允许的
+
+# ===================================
+# Dependency groups (PEP 735)
+# 完整运行依赖仍以 requirements.txt 为权威来源；
+# 此处仅按用途分组登记可选/环境相关依赖。
+# ===================================
+[dependency-groups]
+database = [
+    "psycopg[binary]>=3.1",  # PostgreSQL 驱动（SQLAlchemy 2.0: postgresql+psycopg://）
+]

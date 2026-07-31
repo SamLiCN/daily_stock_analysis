@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 飞书推送新增文件上传能力：`FeishuSender.send_feishu_file(file_path)` 通过 App Bot SDK (`im.v1.file.create`) 上传文件并发送文件消息；Webhook 模式回退为发送文件内容文本；新增 `FEISHU_SEND_AS_FILE=true` 配置开关，开启后飞书以文件形式发送报告而非文字消息。
 - [新功能] 多 Agent 编排 Pipeline 新增子 Agent 独立超时钳位：支持 6 个环境变量为 TechnicalAgent、IntelAgent、RiskAgent、DecisionAgent、PortfolioAgent、SkillAgent 各自配置独立硬上限，互不挤占配额；默认 0 表示关闭钳位。
 - [改进] Web 持仓页未实现盈亏与收益率的涨跌颜色改为跟随系统设置 `MARKET_REVIEW_COLOR_SCHEME`（绿涨红跌 / 红涨绿跌），并同步大盘报告概览与历史趋势抽屉取色，统一全站红绿习惯。
+- [新功能] 存储层支持 PostgreSQL 后端：新增 `DATABASE_BACKEND`（sqlite/postgres/dual）、`DATABASE_URL`、`POSTGRES_SCHEMA=dsa`、`DATA_DIR` 与 `PG_*` 连接池/稳定性配置；切换数据库仅需修改 `.env` 一个变量，默认仍为 SQLite。
+- [新功能] 新增 `scripts/sync_to_postgres.py`（dual 模式幂等镜像：按外键拓扑序把 SQLite 同步到 `myagent.dsa.*` 并重置序列、对比行数）与 `scripts/migrate_to_postgres.py`（一次性全量迁移，含 SQLite 引用完整性预检）。
+- [改进] 解耦 `auth.py` / `llm/usage.py` / `core/market_review_lock.py` 对 `DATABASE_PATH` 的路径依赖，改由独立 `DATA_DIR`（`get_data_dir()`）推导密钥与锁文件路径。
+- [修复] 修复 `upsert_conversation_summary` 与 `portfolio_write_session` 中未做方言保护的 SQLite 专有语法（`sqlite_insert` / `BEGIN IMMEDIATE`），并扩展锁错误识别兼容 PostgreSQL（`deadlock detected` / `could not obtain lock`），使 PG 下写入重试与 `PortfolioBusyError` 正常生效。
 
 ## [3.25.0] - 2026-07-03
 

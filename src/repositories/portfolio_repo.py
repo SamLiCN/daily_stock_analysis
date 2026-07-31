@@ -137,7 +137,8 @@ class PortfolioRepository:
     def portfolio_write_session(self):
         session = self.db.get_session()
         try:
-            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            if getattr(self.db, "_is_sqlite_engine", True):
+                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
         except OperationalError as exc:
             session.close()
             if self._is_sqlite_locked_error(exc):
@@ -943,6 +944,7 @@ class PortfolioRepository:
 
     @staticmethod
     def _is_sqlite_locked_error(exc: OperationalError) -> bool:
+        """判断是否为数据库锁冲突（兼容 SQLite 与 PostgreSQL）。"""
         err_text = str(getattr(exc, "orig", exc)).lower()
         return any(
             token in err_text
@@ -950,6 +952,10 @@ class PortfolioRepository:
                 "database is locked",
                 "database schema is locked",
                 "database table is locked",
+                # PostgreSQL
+                "deadlock detected",
+                "could not obtain lock",
+                "lock not available",
             )
         )
 

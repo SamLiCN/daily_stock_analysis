@@ -675,8 +675,8 @@ def test_create_all_is_idempotent_and_indexes_exist(isolated_db) -> None:
     }
     assert "ix_decision_signal_stock_status_time" in index_names
     assert "ix_decision_signal_market_status_time" in index_names
-    assert "ix_decision_signal_report_type_market_stock_action_horizon_phase" in index_names
-    assert "ix_decision_signal_trace_type_market_stock_action_horizon_phase" in index_names
-    assert "ix_decision_signal_market_stock_profile_created" in index_names
-    assert "ix_decision_signal_report_type_market_stock_profile_action_horizon_phase" in index_names
-    assert "ix_decision_signal_trace_type_market_stock_profile_action_horizon_phase" in index_names
+    assert "ix_ds_report_mkt_stock_action_phase" in index_names
+    assert "ix_ds_trace_mkt_stock_action_phase" in index_names
+    assert "ix_ds_mkt_stock_profile_created" in index_names
+    assert "ix_ds_report_mkt_stock_profile_phase" in index_names
+    assert "ix_ds_trace_mkt_stock_profile_phase" in index_names

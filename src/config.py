@@ -1000,6 +1000,22 @@ class Config:
     sqlite_write_retry_max: int = 3
     sqlite_write_retry_base_delay: float = 0.1
 
+    # === PostgreSQL / 多后端配置 ===
+    # 数据库后端：sqlite（默认，使用 DATABASE_PATH）| postgres | dual
+    database_backend: str = "sqlite"
+    # PostgreSQL 连接串（backend=postgres/dual 时生效），占位符，需替换为真实连接
+    database_url: str = "postgresql+psycopg://user:password@localhost:5432/myagent"
+    # PostgreSQL 目标 schema（所有表统一放入该 schema，表名保持原样）
+    postgres_schema: str = "dsa"
+    # 独立数据目录（存放密钥 / 锁文件等，不再依赖 DATABASE_PATH）
+    data_dir: str = ""
+    # PostgreSQL 连接池与稳定性参数
+    pg_pool_size: int = 10
+    pg_max_overflow: int = 20
+    pg_pool_recycle: int = 1800
+    pg_connect_timeout: int = 10
+    pg_write_retry_max: int = 3
+
     # 是否保存分析上下文快照（用于历史回溯）
     save_context_snapshot: bool = True
 
@@ -1946,6 +1962,15 @@ class Config:
                 field_name='SQLITE_WRITE_RETRY_BASE_DELAY',
                 minimum=0.0,
             ),
+            database_backend=os.getenv('DATABASE_BACKEND', 'sqlite').strip().lower(),
+            database_url=os.getenv('DATABASE_URL', 'postgresql+psycopg://user:password@localhost:5432/myagent'),
+            postgres_schema=os.getenv('POSTGRES_SCHEMA', 'dsa'),
+            data_dir=os.getenv('DATA_DIR', ''),
+            pg_pool_size=parse_env_int(os.getenv('PG_POOL_SIZE'), 10, field_name='PG_POOL_SIZE', minimum=1),
+            pg_max_overflow=parse_env_int(os.getenv('PG_MAX_OVERFLOW'), 20, field_name='PG_MAX_OVERFLOW', minimum=0),
+            pg_pool_recycle=parse_env_int(os.getenv('PG_POOL_RECYCLE'), 1800, field_name='PG_POOL_RECYCLE', minimum=0),
+            pg_connect_timeout=parse_env_int(os.getenv('PG_CONNECT_TIMEOUT'), 10, field_name='PG_CONNECT_TIMEOUT', minimum=1),
+            pg_write_retry_max=parse_env_int(os.getenv('PG_WRITE_RETRY_MAX'), 3, field_name='PG_WRITE_RETRY_MAX', minimum=0),
             save_context_snapshot=os.getenv('SAVE_CONTEXT_SNAPSHOT', 'true').lower() == 'true',
             backtest_enabled=os.getenv('BACKTEST_ENABLED', 'true').lower() == 'true',
             backtest_eval_window_days=parse_env_int(os.getenv('BACKTEST_EVAL_WINDOW_DAYS'), 10, field_name='BACKTEST_EVAL_WINDOW_DAYS', minimum=1),
@@ -3357,13 +3382,33 @@ class Config:
     
     def get_db_url(self) -> str:
         """
-        获取 SQLAlchemy 数据库连接 URL
-        
-        自动创建数据库目录（如果不存在）
+        获取 SQLAlchemy 数据库连接 URL。
+
+        根据 database_backend 选择：
+        - sqlite（默认）：沿用 DATABASE_PATH 指向的本地 .db 文件
+        - postgres / dual：使用 DATABASE_URL（PostgreSQL 连接串）
         """
+        backend = (self.database_backend or "sqlite").strip().lower()
+        if backend in ("postgres", "dual"):
+            pg_url = (self.database_url or "").strip()
+            if pg_url:
+                return pg_url
+            logger.warning(
+                "database_backend=%s 但未配置有效的 DATABASE_URL，回退到 SQLite", backend
+            )
         db_path = Path(self.database_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return f"sqlite:///{db_path.absolute()}"
+
+    def get_data_dir(self) -> Path:
+        """返回数据目录（存放密钥 / 锁文件等），独立于数据库后端。
+
+        优先使用 DATA_DIR / data_dir；未设置时回退到 DATABASE_PATH 所在目录。
+        """
+        data_dir = (self.data_dir or os.getenv("DATA_DIR", "")).strip()
+        if data_dir:
+            return Path(data_dir).resolve()
+        return Path(self.database_path).resolve().parent
 
 
 # === 便捷的配置访问函数 ===
