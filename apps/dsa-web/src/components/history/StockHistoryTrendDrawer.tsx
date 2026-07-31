@@ -12,6 +12,12 @@ import { formatDateTime } from '../../utils/format';
 import { Badge, Button, Card } from '../common';
 import { DashboardStateBlock } from '../dashboard';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
+import { useMarketReviewColorScheme } from '../../hooks/useMarketReviewColorScheme';
+import {
+  DEFAULT_COLOR_SCHEME,
+  getPriceChangeColor,
+  type MarketReviewColorScheme,
+} from '../../utils/priceColor';
 import type { UiTextKey } from '../../i18n/uiText';
 
 interface StockHistoryTrendDrawerProps {
@@ -55,11 +61,15 @@ const formatHistoryTime = (value?: string | null): string => {
   return formatted.length > 11 ? formatted.slice(5) : formatted;
 };
 
-const getPriceChangeStyle = (value?: number): React.CSSProperties | undefined => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) {
+const getPriceChangeStyle = (
+  value?: number,
+  scheme: MarketReviewColorScheme = DEFAULT_COLOR_SCHEME,
+): React.CSSProperties | undefined => {
+  const color = getPriceChangeColor(value, scheme);
+  if (!color) {
     return undefined;
   }
-  return { color: value > 0 ? 'var(--home-price-up)' : 'var(--home-price-down)' };
+  return { color };
 };
 
 const formatModelName = (value: string | undefined, t: (key: UiTextKey, params?: Record<string, string | number>) => string): string => {
@@ -187,6 +197,7 @@ export const StockHistoryTrendDrawer: React.FC<StockHistoryTrendDrawerProps> = (
   onRetry,
 }) => {
   const { t } = useUiLanguage();
+  const colorScheme = useMarketReviewColorScheme();
   const currentRecordId = report.meta.id;
   const [selectedRecordId, setSelectedRecordId] = useState(currentRecordId);
   const actionLabels = useMemo(() => buildDecisionActionLabelMap(t), [t]);
@@ -353,7 +364,7 @@ export const StockHistoryTrendDrawer: React.FC<StockHistoryTrendDrawerProps> = (
                         <td className="px-3 py-3 font-mono text-secondary-text">
                           {formatNumber(item.currentPrice, 2)}
                         </td>
-                        <td className="px-3 py-3 font-mono font-semibold" style={getPriceChangeStyle(item.changePct)}>
+                        <td className="px-3 py-3 font-mono font-semibold" style={getPriceChangeStyle(item.changePct, colorScheme)}>
                           {formatChangePct(item.changePct)}
                         </td>
                         <td className="px-3 py-3 font-mono text-secondary-text">

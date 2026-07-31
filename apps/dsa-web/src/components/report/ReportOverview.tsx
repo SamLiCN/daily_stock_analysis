@@ -9,6 +9,8 @@ import { formatDateTime } from '../../utils/format';
 import { getMarketPhaseSummaryLabel, getPartialBarLabel } from '../../utils/marketPhase';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
+import { useMarketReviewColorScheme } from '../../hooks/useMarketReviewColorScheme';
+import { getPriceChangeColor } from '../../utils/priceColor';
 
 interface ReportOverviewProps {
   meta: ReportMeta;
@@ -168,6 +170,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
   watchlist,
 }) => {
   const { t } = useUiLanguage();
+  const colorScheme = useMarketReviewColorScheme();
   const reportLanguage = normalizeReportLanguage(meta.reportLanguage);
   const text = getReportText(reportLanguage);
   const marketPhaseLabel = getMarketPhaseSummaryLabel(meta.marketPhaseSummary, reportLanguage);
@@ -180,19 +183,11 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
   const preparedRelatedBoards = buildPreparedRelatedBoards(relatedBoards, boardSignals);
 
   const getPriceChangeStyle = (changePct: number | undefined): React.CSSProperties | undefined => {
-    if (changePct === undefined || changePct === null) {
+    const color = getPriceChangeColor(changePct, colorScheme);
+    if (!color) {
       return undefined;
     }
-
-    if (changePct > 0) {
-      return { color: 'var(--home-price-up)' };
-    }
-
-    if (changePct < 0) {
-      return { color: 'var(--home-price-down)' };
-    }
-
-    return undefined;
+    return { color };
   };
 
   const formatChangePct = (changePct: number | undefined): string => {

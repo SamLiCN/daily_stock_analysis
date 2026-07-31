@@ -10,6 +10,8 @@
 /test_*.py
 /test.sh
 
+.workbuddy/
+
 # 本地评审与高级路由配置（可能包含敏感信息或临时分析产物）
 /.codex
 /.tmp
