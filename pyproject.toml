@@ -35,4 +35,5 @@ skips = ["B101"]  # assert 语句在测试中是允许的
 [dependency-groups]
 database = [
     "psycopg[binary]>=3.1",  # PostgreSQL 驱动（SQLAlchemy 2.0: postgresql+psycopg://）
+    "mcp>=2.0,<3",           # MCP server（stdio）：暴露持仓净值/持仓明细/账户列表工具
 ]

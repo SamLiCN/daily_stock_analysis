@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [新功能] MCP server（`mcp_server.py`）新增写入工具 `record_trade`（录入交易）与 `record_cash_ledger`（录入资金流水），复用 `PortfolioService` 事件溯源写入逻辑（自动失效派生缓存、按 `trade_uid`/`dedup_hash` 幂等去重，冲突返回 `status=conflict`）；当前共 6 个工具，供 myagent 调用。
+- [新功能] MCP server（`mcp_server.py`）新增只读工具 `get_trades`（查询交易流水）：复用 `PortfolioService.list_trade_events`，支持按 `account_id` / `date_from` / `date_to` / `symbol` / `side` 筛选并分页（返回 `{items,total,page,page_size}`）；与 `record_trade`/`record_cash_ledger` 共用同一事件溯源真相来源。
+- [新功能] 新增 MCP server（`mcp_server.py`）：通过 stdio 暴露 `get_portfolio_net_value` / `get_portfolio_positions` / `list_accounts` 三个查询工具，供 myagent 等外部项目调用；复用现有 `PortfolioService` 保证口径一致，使用 mcp 2.0 原生 lowlevel API（该版本已移除 FastMCP）。
 - [改进] 为 multi-agent DecisionAgent 增加内部低敏分歧摘要输入管线，作为 #1904 P1 解释输出的前置 plumbing；不改变 public API、dashboard schema 或最终解释字段。
 - [修复] 推送报告、Jinja 报告与历史 Markdown 导出复用 Web/API 的评分-action 口径：高分但旧 `operation_advice` 仍为持有且无降级原因时，建议文案与三类统计展示为买入；有明确 guardrail reason 时继续保留持有/观望。
 - [改进] GitHub Actions 每日分析工作流补齐 TickFlow 数据源环境变量映射，并收敛 README 数据源稳定性说明到完整指南。
