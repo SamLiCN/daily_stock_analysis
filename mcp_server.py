@@ -24,6 +24,12 @@
 
 import sys
 import json
+
+# 强制 stdout 无缓冲：当作为 stdio MCP 子进程运行时，stdout 是管道
+# 而非 TTY，Python 默认使用块缓冲，会导致 JSON-RPC 响应无法及时发送
+# 给父进程（langchain_mcp_adapters）。
+# PYTHONUNBUFFERED=1 环境变量在子进程场景不一定传递，这里用代码兜底。
+sys.stdout.reconfigure(line_buffering=False, write_through=True)
 from datetime import date
 from pathlib import Path
 from typing import Any, Optional
@@ -358,7 +364,7 @@ _TOOL_SPECS: list[types.Tool] = [
             "录入一笔交易（写入 portfolio_trades，事件溯源的真相来源之一）。"
             "支持买入(buy)/卖出(sell)；会自动失效该账户的持仓与每日快照派生缓存，"
             "并在下次净值重放时计入。这是真实写入操作。\n"
-            "建议传入 trade_uid（例如 'acc1-600519-2026-08-01-buy'）实现幂等："
+            "强烈建议传入 trade_uid（例如 'acc1-600519-2026-08-01-buy'）实现幂等："
             "重复提交相同 trade_uid 会被拒绝，返回 status=conflict。"
         ),
         input_schema={
