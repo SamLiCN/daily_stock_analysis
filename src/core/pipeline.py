@@ -162,6 +162,43 @@ def _symbol_scope_lookup_values(code: str, market: str) -> List[str]:
     return values
 
 
+def merge_portfolio_holdings_into_codes(
+    config: "Config",
+    base_codes: List[str],
+) -> List[str]:
+    """Extend the daily price-fetch list with all portfolio-held symbols.
+
+    Keeps any stock/fund the user holds refreshed automatically, so buying a new
+    position never requires manually editing STOCK_LIST. Fail-open: on any error
+    we return the original list so the main flow is never blocked.
+    """
+    flag = getattr(config, "include_portfolio_holdings_in_price_fetch", True)
+    if not flag:
+        return list(base_codes)
+    try:
+        from src.repositories.portfolio_repo import PortfolioRepository
+
+        held = PortfolioRepository().get_distinct_portfolio_symbols(
+            include_inactive_accounts=True
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.warning("[价抓取] 合并持仓标的失败，仅使用 STOCK_LIST: %s", exc)
+        return list(base_codes)
+    if not held:
+        return list(base_codes)
+    base = list(base_codes)
+    base_seen = set(base)
+    added = [s for s in held if s not in base_seen]
+    if added:
+        logger.info(
+            "[价抓取] 自动并入 %d 个持仓标的: %s",
+            len(added),
+            ",".join(added),
+        )
+        base.extend(added)
+    return base
+
+
 class StockAnalysisPipeline:
     """
     股票分析主流程调度器
@@ -2878,6 +2915,8 @@ class StockAnalysisPipeline:
         if stock_codes is None:
             self.config.refresh_stock_list()
             stock_codes = self.config.stock_list
+            # 结构性修复：把持仓账户里的标的也并入每日价抓取，避免手动维护 STOCK_LIST
+            stock_codes = merge_portfolio_holdings_into_codes(self.config, stock_codes)
         
         if not stock_codes:
             logger.error("未配置自选股列表，请在 .env 文件中设置 STOCK_LIST")

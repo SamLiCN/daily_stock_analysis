@@ -729,6 +729,38 @@ class PortfolioRepository:
                 return None
             return float(row.close), row.date
 
+    def get_distinct_portfolio_symbols(
+        self,
+        include_inactive_accounts: bool = True,
+    ) -> List[str]:
+        """Return distinct symbols across all portfolio trades (ever-held).
+
+        Used to extend the daily price fetch beyond STOCK_LIST so that any
+        stock/fund the user holds gets its daily bars refreshed automatically.
+        Querying the trade ledger (not just the current position cache) guarantees
+        coverage of freshly bought symbols before the snapshot cache is rebuilt.
+        """
+        from src.storage import PortfolioTrade
+
+        with self.db.get_session() as session:
+            stmt = select(PortfolioTrade.symbol).distinct()
+            if not include_inactive_accounts:
+                stmt = stmt.join(
+                    PortfolioAccount,
+                    PortfolioTrade.account_id == PortfolioAccount.id,
+                ).where(PortfolioAccount.is_active.is_(True))
+            rows = session.execute(stmt).scalars().all()
+        seen: set = set()
+        result: List[str] = []
+        for raw in rows:
+            if not raw:
+                continue
+            symbol = str(raw).strip()
+            if symbol and symbol not in seen:
+                seen.add(symbol)
+                result.append(symbol)
+        return result
+
     def save_fx_rate(
         self,
         *,

@@ -711,6 +711,9 @@ class Config:
     
     # === 自选股配置 ===
     stock_list: List[str] = field(default_factory=list)
+    # 每日价抓取是否自动并入所有持仓账户里的标的（股票/基金），
+    # 避免用户买入新标的后还需手动维护 STOCK_LIST。默认开启。
+    include_portfolio_holdings_in_price_fetch: bool = True
 
     # === 飞书云文档配置 ===
     feishu_app_id: Optional[str] = None
@@ -2109,6 +2112,9 @@ class Config:
                 minimum=1,
             ),
             portfolio_fx_update_enabled=os.getenv('PORTFOLIO_FX_UPDATE_ENABLED', 'true').lower() == 'true',
+            include_portfolio_holdings_in_price_fetch=parse_env_bool(
+                os.getenv('INCLUDE_PORTFOLIO_HOLDINGS_IN_PRICE_FETCH'), default=True
+            ),
             alphasift_enabled=parse_env_bool(os.getenv('ALPHASIFT_ENABLED'), default=False),
             alphasift_install_spec=(
                 DEFAULT_ALPHASIFT_INSTALL_SPEC

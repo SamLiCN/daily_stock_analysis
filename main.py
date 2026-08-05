@@ -682,6 +682,10 @@ def run_full_analysis(
 
         # Issue #373: Trading day filter (per-stock, per-market)
         effective_codes = stock_codes if stock_codes is not None else config.stock_list
+        # 结构性修复：每日价抓取自动并入所有持仓标的，无需手动维护 STOCK_LIST
+        from src.core.pipeline import merge_portfolio_holdings_into_codes
+
+        effective_codes = merge_portfolio_holdings_into_codes(config, effective_codes)
         filtered_codes, effective_region, should_skip = _compute_trading_day_filter(
             config, args, effective_codes
         )
