@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 存储层支持 PostgreSQL 后端：新增 `DATABASE_BACKEND`（sqlite/postgres/dual）、`DATABASE_URL`、`POSTGRES_SCHEMA=dsa`、`DATA_DIR` 与 `PG_*` 连接池/稳定性配置；切换数据库仅需修改 `.env` 一个变量，默认仍为 SQLite。
 - [新功能] 新增 `scripts/sync_to_postgres.py`（dual 模式幂等镜像：按外键拓扑序把 SQLite 同步到 `myagent.dsa.*` 并重置序列、对比行数）与 `scripts/migrate_to_postgres.py`（一次性全量迁移，含 SQLite 引用完整性预检）。
 - [改进] 每日价抓取（`pipeline.run` 与 `main.run_full_analysis`）结构性并入所有持仓账户里的标的：买入新股/基金后无需手动维护 `STOCK_LIST`，其日线/净值随每日抓取自动刷新（含场内 ETF/LOF）。新增 `INCLUDE_PORTFOLIO_HOLDINGS_IN_PRICE_FETCH`（默认开启），失败时 fail-open 仅回落到 `STOCK_LIST`。
+- [新功能] 每日分析完成后自动推送持仓盈亏明细到已配置的通知渠道（Slack / 飞书 / 钉钉等）：包含逐只持仓的今日盈亏（今价 vs 昨收）、涨跌幅、合计盈亏/市值/浮动盈亏/累计收益，以及当日小结。通过 `main.py` 的 `_generate_portfolio_pnl_report()` 生成，在 `run_full_analysis()` 尾部、`--no_notify` 关闭时跳过。
 - [改进] 解耦 `auth.py` / `llm/usage.py` / `core/market_review_lock.py` 对 `DATABASE_PATH` 的路径依赖，改由独立 `DATA_DIR`（`get_data_dir()`）推导密钥与锁文件路径。
 - [修复] 修复 `upsert_conversation_summary` 与 `portfolio_write_session` 中未做方言保护的 SQLite 专有语法（`sqlite_insert` / `BEGIN IMMEDIATE`），并扩展锁错误识别兼容 PostgreSQL（`deadlock detected` / `could not obtain lock`），使 PG 下写入重试与 `PortfolioBusyError` 正常生效。
 

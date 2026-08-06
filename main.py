@@ -111,6 +111,214 @@ def _resolve_web_service_bind(args: argparse.Namespace, config: Config) -> Tuple
     return host, port
 
 
+def _generate_portfolio_pnl_report(config: Config) -> Optional[str]:
+    """生成当日持仓盈亏明细 Markdown，用于 Slack / 通知渠道推送。
+
+    数据来源：
+      - 当日持仓快照（PortfolioService.get_portfolio_snapshot）
+      - stock_daily 昨收价（计算逐只今日盈亏）
+      - portfolio_daily_snapshots T-1 快照（计算合计今日盈亏）
+
+    返回 None 时表示无持仓数据或非交易日，调用方应跳过推送。
+    """
+    from datetime import date as _date
+    from src.services.portfolio_service import PortfolioService
+    from src.repositories.portfolio_repo import PortfolioRepository
+    from src.storage import StockDaily
+
+    today = _date.today()
+    yesterday = today - __import__("datetime").timedelta(days=1)
+
+    # ---- 1. 当日持仓快照 ----
+    ps = PortfolioService()
+    try:
+        snap = ps.get_portfolio_snapshot(as_of=today, include_realtime=True)
+    except Exception as exc:
+        logger.debug("持仓快照获取失败，跳过盈亏报告: %s", exc)
+        return None
+
+    if not snap.get("accounts"):
+        return None
+
+    # 收集所有持仓行
+    all_positions: List[Dict[str, Any]] = []
+    for acct in snap["accounts"]:
+        for pos in acct.get("positions", []):
+            if (pos.get("quantity") or 0) > 0:
+                pos["_account_name"] = acct.get("account_name", "")
+                all_positions.append(pos)
+
+    if not all_positions:
+        return None
+
+    # ---- 2. 股票名称映射（多源 fallback）----
+    name_map: Dict[str, str] = {}
+    try:
+        from src.data.stock_index_loader import get_stock_name_index_map
+        name_map = get_stock_name_index_map()
+    except Exception:
+        pass
+    # 补充：从最新分析结果表补齐基金/ETF 名称（stock_index_map 通常不含场内基金）
+    missing = [s for s in {p["symbol"] for p in all_positions} if s not in name_map]
+    if missing:
+        try:
+            from src.storage import AnalysisHistory as _AR
+            from sqlalchemy import select
+            from src.storage import DatabaseManager
+            _db = DatabaseManager()
+            with _db.get_session() as _sess:
+                for sym in list(missing):
+                    row = _sess.execute(
+                        select(_AR.name).where(_AR.code == sym)
+                        .order_by(_AR.created_at.desc()).limit(1)
+                    ).scalar_one_or_none()
+                    if row and row.strip():
+                        name_map[sym] = row.strip()
+                        missing.remove(sym)
+        except Exception:
+            pass
+
+    # ---- 3. 逐只取昨收、算今日盈亏 ----
+    repo = PortfolioRepository()
+    rows: List[Dict[str, Any]] = []
+
+    for pos in all_positions:
+        symbol = pos["symbol"]
+        qty = pos.get("quantity", 0)
+        last_price = pos.get("last_price") or 0
+        avg_cost = pos.get("avg_cost") or 0
+
+        # 昨收：取 stock_daily 最近一条 date < today 的 close
+        prev_close = 0.0
+        try:
+            result = repo.get_latest_close_with_date(symbol=symbol, as_of=yesterday)
+            if result:
+                prev_close = result[0]
+        except Exception:
+            pass
+
+        day_pnl_amt = round((float(last_price) - float(prev_close)) * float(qty), 2) if qty else 0.0
+        day_chg_pct = (
+            round((float(last_price) - float(prev_close)) / float(prev_close) * 100, 3)
+            if prev_close and last_price else 0.0
+        )
+        mkt_val = pos.get("market_value_base") or round(float(last_price) * float(qty), 2)
+        unrealized = pos.get("unrealized_pnl_base") or 0.0
+
+        display_name = name_map.get(symbol) or symbol
+
+        rows.append({
+            "symbol": symbol,
+            "name": display_name,
+            "qty": int(qty),
+            "avg_cost": avg_cost,
+            "prev_close": round(prev_close, 3),
+            "last_price": round(float(last_price), 3),
+            "day_chg_pct": day_chg_pct,
+            "day_pnl": day_pnl_amt,
+            "mkt_val": mkt_val,
+            "unrealized": unrealized,
+        })
+
+    # ---- 4. 合计 ----
+    total_day_pnl = round(sum(r["day_pnl"] for r in rows), 2)
+    total_mkt_val = snap.get("total_market_value", 0) or sum(r["mkt_val"] for r in rows)
+    total_unrealized = snap.get("unrealized_pnl", 0) or sum(r["unrealized"] for r in rows)
+    total_realized = snap.get("realized_pnl", 0) or 0.0
+    total_equity = snap.get("total_equity", 0) or (total_mkt_val + snap.get("total_cash", 0))
+
+    # 日快照 T-1 净值（仅作参考，不替代逐只汇总）
+    prev_equity = 0.0
+    try:
+        cost_method = snap.get("cost_method", "fifo")
+        snaps = repo.list_daily_snapshots_for_risk(
+            as_of=yesterday, cost_method=cost_method, lookback_days=3,
+        )
+        if snaps:
+            snap_dates = sorted({s.snapshot_date for s in snaps}, reverse=True)
+            latest_prev_dt = snap_dates[0]
+            prev_equity = sum(
+                float(s.total_equity or 0) for s in snaps if s.snapshot_date == latest_prev_dt
+            )
+    except Exception:
+        pass
+
+    cumulative_pnl = round(total_unrealized + total_realized, 2)
+
+    # ---- 5. 格式化 Markdown ----
+    lines: List[str] = []
+    lines.append(f"📈 **今日盈亏明细（{today.isoformat()}）**")
+    lines.append("")
+    lines.append(
+        f"已获取最新持仓数据（{today.isoformat()}）。"
+        f"由于工具提供的是持仓浮动盈亏（相对成本价），"
+        f"今日盈亏我通过 **今日现价 vs 昨日（{yesterday.isoformat()}）收盘价** 对比为您计算："
+    )
+    lines.append("")
+
+    # 明细表
+    lines.append("| 代码 | 名称 | 数量 | 昨收 | 今价 | 涨跌幅 | 今日盈亏 |")
+    lines.append("|------|------|------|------|------|--------|----------|")
+    for r in rows:
+        chg_str = f"{r['day_chg_pct']:+.3f}" if r["prev_close"] else "-"
+        pnl_str = f"{r['day_pnl']:+,.2f}" if r["day_pnl"] != 0 else "0.00"
+        lines.append(
+            f"| {r['symbol']} | {r['name']} | {r['qty']:,} "
+            f"| {r['prev_close']:.3f} | {r['last_price']:.3f} "
+            f"| {chg_str} | ¥{pnl_str} |"
+        )
+
+    lines.append("")
+    lines.append("### 💰 今日合计")
+    lines.append("")
+    lines.append("| 项目 | 金额 |")
+    lines.append("|------|------|")
+
+    # 今日盈亏着色（以逐只汇总为准）
+    dp = total_day_pnl
+    dp_emoji = "🔴" if dp < 0 else ("🟢" if dp > 0 else "⚪")
+    lines.append(f"| 今日盈亏 | **¥{dp:,.2f}** {dp_emoji} |")
+    lines.append(f"| 今日市值 | ¥{total_mkt_val:,.2f} |")
+    lines.append(f"| 总浮动盈亏 | **¥{total_unrealized:,.2f}** |")
+    lines.append(f"| 已实现盈亏 | **¥{total_realized:,.2f}** |")
+    lines.append(f"| 累计收益 | **¥{cumulative_pnl:,.2f}** |")
+    lines.append("")
+
+    # 小结
+    winners = [r for r in rows if r["day_pnl"] > 0]
+    losers = [r for r in rows if r["day_pnl"] < 0]
+    summary_parts = [f"今日整体{'盈利' if dp >= 0 else '亏损'} **¥{abs(dp):,.2f}**"]
+
+    if losers:
+        top_loser = min(losers, key=lambda x: x["day_pnl"])  # 最大亏损 = 最小值
+        summary_parts.append(
+            f"主要受 **{top_loser['name']}**（¥{top_loser['day_pnl']:,.2f}）拖累"
+        )
+    if winners:
+        top_winner = max(winners, key=lambda x: x["day_pnl"])
+        others = [w for w in winners if w["symbol"] != top_winner["symbol"]]
+        names = f"{top_winner['name']}"
+        if others:
+            names += f" 与 {others[0]['name']}"
+        summary_parts.append(f"✅ **{names}**（¥{top_winner['day_pnl']:,.2f}）逆势上涨")
+
+    lines.append("> 📝 **今日小结：** " + "；".join(summary_parts))
+    lines.append("")
+    lines.append(
+        f"> ⚠️ 说明：今日盈亏基于 {yesterday.isoformat()} 收盘价估算，"
+        f"若需精确到券商口径的\"当日盈亏\"，建议以交易软件为准。"
+    )
+    if prev_equity:
+        snap_delta = round(total_equity - prev_equity, 2)
+        lines.append(
+            f"> 📊 净值口径参考：昨日净值 ¥{prev_equity:,.2f} → 今日 ¥{total_equity:,.2f}"
+            f"（变动 ¥{snap_delta:,.2f}，含现金变动与持仓盈亏）"
+        )
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 def _read_active_env_values() -> Optional[Dict[str, str]]:
     env_path = _get_active_env_path()
     if not env_path.exists():
@@ -928,6 +1136,21 @@ def run_full_analysis(
                 )
 
         logger.info("\n任务执行完成")
+
+        # === 每日持仓盈亏推送（Slack / 已配置通知渠道）===
+        if not args.no_notify and not dry_run:
+            try:
+                _pnl_content = _generate_portfolio_pnl_report(config)
+                if _pnl_content and pipeline.notifier.is_available():
+                    if pipeline.notifier.send(
+                        _pnl_content,
+                        route_type="report",
+                    ):
+                        logger.info("已推送持仓盈亏报告")
+                    else:
+                        logger.warning("持仓盈亏报告推送失败")
+            except Exception as _pnl_exc:
+                logger.warning("持仓盈亏报告生成/推送跳过: %s", _pnl_exc)
 
         # === 新增：生成飞书云文档 ===
         try:
