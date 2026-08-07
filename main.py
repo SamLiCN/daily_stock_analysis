@@ -1138,7 +1138,7 @@ def run_full_analysis(
         logger.info("\n任务执行完成")
 
         # === 每日持仓盈亏推送（Slack / 已配置通知渠道）===
-        if not args.no_notify and not dry_run:
+        if not args.no_notify and not args.dry_run:
             try:
                 _pnl_content = _generate_portfolio_pnl_report(config)
                 if _pnl_content and pipeline.notifier.is_available():
