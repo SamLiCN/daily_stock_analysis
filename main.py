@@ -1138,7 +1138,11 @@ def run_full_analysis(
         logger.info("\n任务执行完成")
 
         # === 每日持仓盈亏推送（Slack / 已配置通知渠道）===
-        if not args.no_notify and not args.dry_run:
+        # 跟随 --no_notify：加 --no_notify 则跳过。
+        # 注意：不跟随 --dry-run，因为持仓盈亏仅依赖已抓取的行情与持仓快照，
+        # 每日价抓取（含 --dry-run 的 fetch-only 流程）完成后即可推送，
+        # 与用户“只用 --dry-run 也推送持仓净值”的诉求一致。
+        if not args.no_notify:
             try:
                 _pnl_content = _generate_portfolio_pnl_report(config)
                 if _pnl_content and pipeline.notifier.is_available():
