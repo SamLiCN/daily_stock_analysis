@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 每日价抓取（`pipeline.run` 与 `main.run_full_analysis`）结构性并入所有持仓账户里的标的：买入新股/基金后无需手动维护 `STOCK_LIST`，其日线/净值随每日抓取自动刷新（含场内 ETF/LOF）。新增 `INCLUDE_PORTFOLIO_HOLDINGS_IN_PRICE_FETCH`（默认开启），失败时 fail-open 仅回落到 `STOCK_LIST`。
 - [新功能] 每日分析完成后自动推送持仓盈亏明细到已配置的通知渠道（Slack / 飞书 / 钉钉等）：包含逐只持仓的今日盈亏（今价 vs 昨收）、涨跌幅、合计盈亏/市值/浮动盈亏/累计收益，以及当日小结。通过 `main.py` 的 `_generate_portfolio_pnl_report()` 生成，在 `run_full_analysis()` 尾部、`--no_notify` 关闭时跳过。推送开关仅跟随 `--no_notify`，**不跟随 `--dry-run`**，因此仅做每日价抓取的 `--dry-run` 流程完成后也会推送持仓净值（持仓盈亏仅依赖已抓取行情与持仓快照，无需 AI 分析）。
 - [改进] 解耦 `auth.py` / `llm/usage.py` / `core/market_review_lock.py` 对 `DATABASE_PATH` 的路径依赖，改由独立 `DATA_DIR`（`get_data_dir()`）推导密钥与锁文件路径。
+- [修复] 新增**场外开放式公募基金**净值(NAV)获取通道：此前价格/行情管线只支持 A 股、港股、ETF(场内)与美股，场外开放式基金（如 006327）被误判为 A 股走股票接口导致每日净值更新与分析均取不到价。新增 `base._is_open_end_fund_code` 判别（覆盖 004-009 / 01-09 / 1xxxxx 等基金前缀，排除 A 股/ETF/B 股/北交所），并在 `AkshareFetcher` 增加 `_fetch_open_fund_data`（ak.fund_open_fund_info_em 单位净值走势）与实时净值兜底 `_get_open_fund_realtime_nav`；`EfinanceFetcher` 对场外基金显式 failover 到 AkShare。每日价抓取与分析现可自动覆盖场外基金，净值作为 `close` 写入 `stock_daily`；`get_realtime_quote` 对场外基金返回最新单位净值（`data_quality=partial`）。
 - [修复] 修复 `upsert_conversation_summary` 与 `portfolio_write_session` 中未做方言保护的 SQLite 专有语法（`sqlite_insert` / `BEGIN IMMEDIATE`），并扩展锁错误识别兼容 PostgreSQL（`deadlock detected` / `could not obtain lock`），使 PG 下写入重试与 `PortfolioBusyError` 正常生效。
 
 ## [3.25.0] - 2026-07-03

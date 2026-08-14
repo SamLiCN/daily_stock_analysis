@@ -475,6 +475,7 @@ class PortfolioService:
         as_of: Optional[date] = None,
         cost_method: str = "fifo",
         include_realtime: bool = True,
+        persist: bool = True,
     ) -> Dict[str, Any]:
         as_of_date = as_of or date.today()
         method = self._normalize_cost_method(cost_method)
@@ -507,24 +508,27 @@ class PortfolioService:
                 include_realtime=include_realtime,
             )
 
-            self.repo.replace_positions_lots_and_snapshot(
-                account_id=account.id,
-                snapshot_date=as_of_date,
-                cost_method=method,
-                base_currency=account.base_currency,
-                total_cash=account_snapshot["total_cash"],
-                total_market_value=account_snapshot["total_market_value"],
-                total_equity=account_snapshot["total_equity"],
-                unrealized_pnl=account_snapshot["unrealized_pnl"],
-                realized_pnl=account_snapshot["realized_pnl"],
-                fee_total=account_snapshot["fee_total"],
-                tax_total=account_snapshot["tax_total"],
-                fx_stale=account_snapshot["fx_stale"],
-                payload=json.dumps(account_snapshot["payload"], ensure_ascii=False),
-                positions=account_snapshot["positions_cache"],
-                lots=account_snapshot["lots_cache"],
-                valuation_currency=account.base_currency,
-            )
+            # 历史快照（as_of < 今天）不可变，跳过写库可消除趋势查询的写放大；
+            # 今天的快照默认仍写库，以刷新持仓/每日快照派生缓存。
+            if persist:
+                self.repo.replace_positions_lots_and_snapshot(
+                    account_id=account.id,
+                    snapshot_date=as_of_date,
+                    cost_method=method,
+                    base_currency=account.base_currency,
+                    total_cash=account_snapshot["total_cash"],
+                    total_market_value=account_snapshot["total_market_value"],
+                    total_equity=account_snapshot["total_equity"],
+                    unrealized_pnl=account_snapshot["unrealized_pnl"],
+                    realized_pnl=account_snapshot["realized_pnl"],
+                    fee_total=account_snapshot["fee_total"],
+                    tax_total=account_snapshot["tax_total"],
+                    fx_stale=account_snapshot["fx_stale"],
+                    payload=json.dumps(account_snapshot["payload"], ensure_ascii=False),
+                    positions=account_snapshot["positions_cache"],
+                    lots=account_snapshot["lots_cache"],
+                    valuation_currency=account.base_currency,
+                )
 
             accounts_payload.append(account_snapshot["public"])
             aggregate["limitations"] = _merge_portfolio_limitations(

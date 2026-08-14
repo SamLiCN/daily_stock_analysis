@@ -207,6 +207,33 @@ def _is_etf_code(code: str) -> bool:
     )
 
 
+# 场外开放式公募基金代码前缀（6 位）。覆盖 004-009、01-09、1xxxxx 等常见开放
+# 式基金区间，刻意排除 A 股股票（000-003 深市主板 / 30 创业板 / 60 沪市 / 68 科创
+# 板 / 8 北交所 / 4 老三板 / 9 B 股）与 ETF（51/52/56/58/15/16/18）。
+# 说明：11/12  prefix 为可转债，不在覆盖范围内（超出本需求范围，且误判无副作用，
+# 因为 fund_open_fund_info_em 对其返回空，会自然 failover）。
+_OPEN_END_FUND_PREFIXES = (
+    "004", "005", "006", "007", "008", "009",
+    "01", "02", "03", "04", "05", "06", "07", "08", "09",
+    "1",
+)
+
+
+def _is_open_end_fund_code(code: str) -> bool:
+    """判定 A 股场外开放式公募基金代码（非 ETF、非 A 股、非北交所/老三板）。
+
+    场外开放式基金净值走 akshare ``fund_open_fund_info_em``（单位净值走势），
+    每日盘后更新一次，没有实时盘口。该函数只做代码前缀判别；真正取数由
+    ``AkshareFetcher._fetch_open_fund_data`` 负责。
+    """
+    normalized = normalize_stock_code(code)
+    if not (normalized.isdigit() and len(normalized) == 6):
+        return False
+    if _is_etf_code(normalized):
+        return False
+    return normalized.startswith(_OPEN_END_FUND_PREFIXES)
+
+
 def _coerce_chip_metric(value: Any) -> Optional[float]:
     try:
         if value is None:

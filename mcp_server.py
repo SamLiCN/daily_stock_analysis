@@ -72,12 +72,14 @@ def get_net_value(
     as_of: Optional[str] = None,
     cost_method: str = "fifo",
     include_realtime: bool = True,
+    persist: bool = True,
 ) -> dict:
     return _service().get_portfolio_snapshot(
         account_id=account_id,
         as_of=_parse_as_of(as_of),
         cost_method=cost_method or "fifo",
         include_realtime=include_realtime,
+        persist=persist,
     )
 
 
@@ -266,6 +268,10 @@ _TOOL_SPECS: list[types.Tool] = [
                     "type": "boolean",
                     "description": "是否用实时价格估值；false 用最后已知价（离线更快），默认 true",
                 },
+                "persist": {
+                    "type": "boolean",
+                    "description": "是否把结果写回持仓/每日快照派生缓存。历史日期(as_of 早于今天)可传 false 跳过写库以提速，默认 true",
+                },
             },
             "required": [],
         },
@@ -445,6 +451,7 @@ async def _handle_call_tool(ctx, params: types.CallToolRequestParams) -> types.C
                 as_of=args.get("as_of"),
                 cost_method=args.get("cost_method", "fifo"),
                 include_realtime=args.get("include_realtime", True),
+                persist=args.get("persist", True),
             )
         elif name == "get_portfolio_positions":
             payload = get_positions(

@@ -64,6 +64,7 @@ from .base import (
     normalize_stock_code,
     _is_hk_market,
     _is_etf_code as _is_a_share_etf_code,
+    _is_open_end_fund_code,
 )
 from .realtime_types import (
     UnifiedRealtimeQuote, RealtimeSource,
@@ -388,6 +389,11 @@ class EfinanceFetcher(BaseFetcher):
         # 根据代码类型选择不同的获取方法
         if _is_etf_code(stock_code):
             return self._fetch_etf_data(stock_code, start_date, end_date)
+        elif _is_open_end_fund_code(stock_code):
+            # 场外开放式基金 efinance 不支持，交由 AkshareFetcher 取净值
+            raise DataFetchError(
+                f"EfinanceFetcher 不支持场外开放式基金 {stock_code}，请使用 AkshareFetcher 获取净值"
+            )
         else:
             return self._fetch_stock_data(stock_code, start_date, end_date)
     
@@ -636,6 +642,10 @@ class EfinanceFetcher(BaseFetcher):
         # ETF 需要单独请求 ETF 实时行情接口
         if _is_etf_code(stock_code):
             return self._get_etf_realtime_quote(stock_code)
+
+        # 场外开放式基金无实时盘口，交由 AkshareFetcher 返回最新净值
+        if _is_open_end_fund_code(stock_code):
+            return None
 
         import efinance as ef
         circuit_breaker = get_realtime_circuit_breaker()
