@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 解耦 `auth.py` / `llm/usage.py` / `core/market_review_lock.py` 对 `DATABASE_PATH` 的路径依赖，改由独立 `DATA_DIR`（`get_data_dir()`）推导密钥与锁文件路径。
 - [修复] 新增**场外开放式公募基金**净值(NAV)获取通道：此前价格/行情管线只支持 A 股、港股、ETF(场内)与美股，场外开放式基金（如 006327）被误判为 A 股走股票接口导致每日净值更新与分析均取不到价。新增 `base._is_open_end_fund_code` 判别（覆盖 004-009 / 01-09 / 1xxxxx 等基金前缀，排除 A 股/ETF/B 股/北交所），并在 `AkshareFetcher` 增加 `_fetch_open_fund_data`（ak.fund_open_fund_info_em 单位净值走势）与实时净值兜底 `_get_open_fund_realtime_nav`；`EfinanceFetcher` 对场外基金显式 failover 到 AkShare。每日价抓取与分析现可自动覆盖场外基金，净值作为 `close` 写入 `stock_daily`；`get_realtime_quote` 对场外基金返回最新单位净值（`data_quality=partial`）。
 - [修复] 修复 `upsert_conversation_summary` 与 `portfolio_write_session` 中未做方言保护的 SQLite 专有语法（`sqlite_insert` / `BEGIN IMMEDIATE`），并扩展锁错误识别兼容 PostgreSQL（`deadlock detected` / `could not obtain lock`），使 PG 下写入重试与 `PortfolioBusyError` 正常生效。
+- [新功能] 新增 `scripts/sync_prod_to_demo.py`：自包含（仅依赖 psycopg3）把生产 PostgreSQL（`myagent.dsa`）按覆盖方式同步到测试库（`myagent_demo.dsa`）。默认 dry-run，`--apply` 才写入，覆盖前自动对测试库做 COPY 快照备份（`--restore` 可回滚，`--list-backups` 列出备份）；内置源库只读会话与「目标库名白名单 / 源库名 != 目标库名」防误覆盖护栏，单事务 TRUNCATE + COPY 重灌 + 序列重置，生产 schema 演进时表清单/外键拓扑/序列自动从 pg_catalog 发现。配套新增 `SYNC_SOURCE_DB` / `SYNC_SOURCE_DATABASE_URL` / `SYNC_TARGET_DB` / `SYNC_BACKUP_DIR` / `SYNC_BACKUP_KEEP` 配置项。
 
 ## [3.25.0] - 2026-07-03
 
