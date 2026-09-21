@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 > For user-friendly release highlights, see the [GitHub Releases](https://github.com/ZhuLinsen/daily_stock_analysis/releases) page.
 
 ## [Unreleased]
+- [改进] 每日持仓盈亏推送在飞书渠道 @所有人（`mention_all`），强制走文本消息以触发提及（interactive card 的 lark_md 不渲染 `<at>` 标签），不影响其他通知渠道。
 - [新功能] MCP server（`mcp_server.py`）新增写入工具 `record_trade`（录入交易）与 `record_cash_ledger`（录入资金流水），复用 `PortfolioService` 事件溯源写入逻辑（自动失效派生缓存、按 `trade_uid`/`dedup_hash` 幂等去重，冲突返回 `status=conflict`）；当前共 6 个工具，供 myagent 调用。
 - [新功能] MCP server（`mcp_server.py`）新增只读工具 `get_trades`（查询交易流水）：复用 `PortfolioService.list_trade_events`，支持按 `account_id` / `date_from` / `date_to` / `symbol` / `side` 筛选并分页（返回 `{items,total,page,page_size}`）；与 `record_trade`/`record_cash_ledger` 共用同一事件溯源真相来源。
 - [新功能] 新增 MCP server（`mcp_server.py`）：通过 stdio 暴露 `get_portfolio_net_value` / `get_portfolio_positions` / `list_accounts` 三个查询工具，供 myagent 等外部项目调用；复用现有 `PortfolioService` 保证口径一致，使用 mcp 2.0 原生 lowlevel API（该版本已移除 FastMCP）。

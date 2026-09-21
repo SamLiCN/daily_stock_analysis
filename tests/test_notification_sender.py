@@ -447,6 +447,40 @@ class TestFeishuSender(unittest.TestCase):
         self.assertEqual(mock_raw.call_args_list[0][0][1], "interactive")
         self.assertIn("**bold**", mock_raw.call_args_list[0][0][2])
 
+    @mock.patch.object(FeishuSender, "_app_send_raw", return_value=True)
+    def test_app_bot_mention_all_sends_text_only(self, mock_raw):
+        """mention_all=True forces a text message with the @所有人 tag (no card)."""
+        cfg = _config(
+            feishu_app_id="cli_app",
+            feishu_app_secret="secret",
+            feishu_chat_id="oc_chat",
+        )
+        sender = FeishuSender(cfg)
+        with mock.patch.object(FeishuSender, "_ensure_app_client", return_value=object()):
+            result = sender.send_to_feishu("**hello** world", mention_all=True)
+
+        self.assertTrue(result)
+        mock_raw.assert_called_once()
+        self.assertEqual(mock_raw.call_args[0][1], "text")
+        text = json.loads(mock_raw.call_args[0][2])["text"]
+        self.assertTrue(text.startswith('<at user_id="all">所有人</at>'))
+        self.assertIn("**hello**", text)
+
+    @mock.patch("src.notification_sender.feishu_sender.requests.post")
+    def test_webhook_mention_all_sends_text_only(self, mock_post):
+        """mention_all=True skips the interactive card and sends text with @所有人."""
+        mock_post.return_value = _response(200, {"code": 0})
+        cfg = _config(feishu_webhook_url="https://feishu.example/hook")
+        sender = FeishuSender(cfg)
+
+        result = sender.send_to_feishu("hello", mention_all=True)
+
+        self.assertTrue(result)
+        mock_post.assert_called_once()
+        payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["msg_type"], "text")
+        self.assertTrue(payload["content"]["text"].startswith('<at user_id="all">所有人</at>'))
+
     @mock.patch("src.notification_sender.feishu_sender.requests.post")
     @mock.patch.object(FeishuSender, "_app_send_raw", return_value=True)
     def test_webhook_takes_precedence_over_app_bot(self, mock_app_raw, mock_webhook_post):

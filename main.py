@@ -1149,6 +1149,7 @@ def run_full_analysis(
                     if pipeline.notifier.send(
                         _pnl_content,
                         route_type="report",
+                        mention_all=True,
                     ):
                         logger.info("已推送持仓盈亏报告")
                     else:

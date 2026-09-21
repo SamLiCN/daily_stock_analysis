@@ -424,7 +424,7 @@ class TestNotificationServiceSendToMethods(unittest.TestCase):
         self.assertTrue(result.dispatched)
         self.assertTrue(result.success)
         self.assertEqual([item.channel for item in result.channel_results], ["feishu"])
-        mock_webhook.assert_called_once_with("content")
+        mock_webhook.assert_called_once_with("content", mention_all=False)
 
     @mock.patch("src.notification.get_config")
     def test_feishu_send_as_file_route_report_calls_send_feishu_file(self, mock_get_config):
@@ -454,7 +454,7 @@ class TestNotificationServiceSendToMethods(unittest.TestCase):
              mock.patch.object(service, "save_report_to_file") as mock_save:
             result = service.send_with_results("alert content", route_type="alert")
         self.assertTrue(result.success)
-        mock_text.assert_called_once_with("alert content")
+        mock_text.assert_called_once_with("alert content", mention_all=False)
         mock_save.assert_not_called()
 
     @mock.patch("src.notification.get_config")
@@ -470,7 +470,7 @@ class TestNotificationServiceSendToMethods(unittest.TestCase):
              mock.patch.object(service, "save_report_to_file") as mock_save:
             result = service.send_with_results("report content")
         self.assertTrue(result.success)
-        mock_text.assert_called_once_with("report content")
+        mock_text.assert_called_once_with("report content", mention_all=False)
         mock_save.assert_not_called()
 
     @mock.patch("src.notification.get_config")
@@ -486,7 +486,7 @@ class TestNotificationServiceSendToMethods(unittest.TestCase):
              mock.patch.object(service, "save_report_to_file") as mock_save:
             result = service.send_with_results("report content", route_type="report")
         self.assertTrue(result.success)
-        mock_text.assert_called_once_with("report content")
+        mock_text.assert_called_once_with("report content", mention_all=False)
         mock_save.assert_not_called()
 
     @mock.patch("src.notification.get_config")
@@ -520,7 +520,7 @@ class TestNotificationServiceSendToMethods(unittest.TestCase):
              mock.patch.object(service, "save_report_to_file") as mock_save:
             result = service.send_with_results("error", route_type="system_error")
         self.assertTrue(result.success)
-        mock_text.assert_called_once_with("error")
+        mock_text.assert_called_once_with("error", mention_all=False)
         mock_save.assert_not_called()
 
     @mock.patch("src.notification.get_config")

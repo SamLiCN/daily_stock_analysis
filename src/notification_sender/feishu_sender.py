@@ -75,6 +75,10 @@ _APP_SEND_RETRIES = 3
 _APP_SEND_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
 _WEBHOOK_SEND_TIMEOUT_SECONDS = 30
 
+# Feishu 文本消息中 @所有人 的提及标签。仅文本消息（msg_type=text）支持；
+# interactive card 的 lark_md 不渲染 <at> 标签，因此 mention_all 时强制走文本。
+_MENTION_ALL_TAG = '<at user_id="all">所有人</at>'
+
 # Sentinel for "client not yet initialised".
 _NO_CLIENT = object()
 
@@ -220,7 +224,7 @@ class FeishuSender:
     # App Bot send helpers
     # ------------------------------------------------------------------
 
-    def _send_via_app_bot(self, content: str) -> bool:
+    def _send_via_app_bot(self, content: str, *, mention_all: bool = False) -> bool:
         """Send message through the Feishu App Bot, chunking if necessary."""
         if not self._feishu_chat_id:
             logger.warning("FEISHU_CHAT_ID 未配置，跳过 App Bot 推送")
@@ -231,17 +235,19 @@ class FeishuSender:
             return False
 
         formatted = format_feishu_markdown(content)
+        if mention_all:
+            formatted = f"{_MENTION_ALL_TAG} {formatted}"
         content_bytes = len(formatted.encode("utf-8"))
 
         if content_bytes > self._feishu_max_bytes:
             logger.info(
                 "App Bot 消息超长 (%d 字节)，将分批发送", content_bytes
             )
-            return self._app_send_chunked(client, formatted)
+            return self._app_send_chunked(client, formatted, mention_all=mention_all)
 
-        return self._app_send_once(client, formatted)
+        return self._app_send_once(client, formatted, mention_all=mention_all)
 
-    def _app_send_chunked(self, client: Any, content: str) -> bool:
+    def _app_send_chunked(self, client: Any, content: str, *, mention_all: bool = False) -> bool:
         """Chunk and send long content through App Bot."""
         try:
             chunks = chunk_content_by_max_bytes(
@@ -253,7 +259,8 @@ class FeishuSender:
 
         success = True
         for i, chunk in enumerate(chunks):
-            ok = self._app_send_once(client, chunk)
+            # @所有人 标签只出现在第一片（chunk_content_by_max_bytes 保证其位于首片）。
+            ok = self._app_send_once(client, chunk, mention_all=mention_all and i == 0)
             if not ok:
                 logger.error("App Bot 第 %d/%d 批发送失败", i + 1, len(chunks))
                 success = False
@@ -261,13 +268,20 @@ class FeishuSender:
                 time.sleep(1)
         return success
 
-    def _app_send_once(self, client: Any, content: str) -> bool:
+    def _app_send_once(self, client: Any, content: str, *, mention_all: bool = False) -> bool:
         """Single-shot send via App Bot with card-first / text-fallback.
 
         Content received here has already been through ``format_feishu_markdown``
         which converts all Markdown constructs to ``lark_md``-compatible format.
         The interactive card uses ``tag: lark_md`` for rendering.
+
+        ``mention_all`` 时强制走文本消息：interactive card 的 lark_md 不渲染
+        ``<at>`` 标签，只有文本消息能正确触发 @所有人。
         """
+        if mention_all:
+            text_payload = json.dumps({"text": content}, ensure_ascii=False)
+            return self._app_send_raw(client, "text", text_payload)
+
         card_payload = json.dumps(self._build_card_body(content), ensure_ascii=False)
 
         if self._app_send_raw(client, "interactive", card_payload):
@@ -356,7 +370,13 @@ class FeishuSender:
     # Public API
     # ------------------------------------------------------------------
 
-    def send_to_feishu(self, content: str, *, timeout_seconds: Optional[float] = None) -> bool:
+    def send_to_feishu(
+        self,
+        content: str,
+        *,
+        timeout_seconds: Optional[float] = None,
+        mention_all: bool = False,
+    ) -> bool:
         """
         Push a message to Feishu.
 
@@ -365,6 +385,11 @@ class FeishuSender:
           2. **App Bot** – when ``feishu_app_id`` + ``feishu_app_secret``
              + ``feishu_chat_id`` are all configured and webhook is absent.
 
+        Args:
+            content: 消息内容。
+            timeout_seconds: Webhook 请求超时（秒），App Bot 路径忽略。
+            mention_all: 是否 @所有人（仅文本消息支持，会强制跳过卡片）。
+
         Returns:
             Whether the send succeeded.
         """
@@ -372,8 +397,10 @@ class FeishuSender:
             logger.error("send_to_feishu: content 不能为 None")
             return False
         if self._feishu_url:
-            return self._send_via_webhook(content, timeout_seconds=timeout_seconds)
-        return self._send_via_app_bot(content)
+            return self._send_via_webhook(
+                content, timeout_seconds=timeout_seconds, mention_all=mention_all
+            )
+        return self._send_via_app_bot(content, mention_all=mention_all)
 
     def send_feishu_file(self, file_path: str) -> bool:
         """
@@ -497,9 +524,17 @@ class FeishuSender:
     # Webhook path (legacy, unchanged)
     # ------------------------------------------------------------------
 
-    def _send_via_webhook(self, content: str, *, timeout_seconds: Optional[float] = None) -> bool:
+    def _send_via_webhook(
+        self,
+        content: str,
+        *,
+        timeout_seconds: Optional[float] = None,
+        mention_all: bool = False,
+    ) -> bool:
         """Legacy webhook send path."""
         formatted_content = format_feishu_markdown(content)
+        if mention_all:
+            formatted_content = f"{_MENTION_ALL_TAG} {formatted_content}"
 
         max_bytes = self._feishu_max_bytes
         keyword_overhead = len(self._get_keyword_prefix().encode("utf-8"))
@@ -520,15 +555,19 @@ class FeishuSender:
                 )
                 return False
             logger.info("飞书消息内容超长(%d字节/%d字符)，将分批发送", content_bytes, len(content))
-            return self._send_feishu_chunked(formatted_content, effective_max_bytes)
+            return self._send_feishu_chunked(
+                formatted_content, effective_max_bytes, mention_all=mention_all
+            )
 
         try:
-            return self._send_feishu_message(formatted_content, timeout_seconds=timeout_seconds)
+            return self._send_feishu_message(
+                formatted_content, timeout_seconds=timeout_seconds, mention_all=mention_all
+            )
         except Exception as e:
             logger.error("发送飞书消息失败: %s", e)
             return False
 
-    def _send_feishu_chunked(self, content: str, max_bytes: int) -> bool:
+    def _send_feishu_chunked(self, content: str, max_bytes: int, *, mention_all: bool = False) -> bool:
         try:
             chunks = chunk_content_by_max_bytes(content, max_bytes, add_page_marker=True)
         except ValueError as e:
@@ -540,7 +579,8 @@ class FeishuSender:
         logger.info("飞书分批发送：共 %d 批", total_chunks)
         for i, chunk in enumerate(chunks):
             try:
-                if self._send_feishu_message(chunk):
+                # @所有人 标签只出现在第一片。
+                if self._send_feishu_message(chunk, mention_all=mention_all and i == 0):
                     success_count += 1
                     logger.info("飞书第 %d/%d 批发送成功", i + 1, total_chunks)
                 else:
@@ -551,8 +591,18 @@ class FeishuSender:
                 time.sleep(1)
         return success_count == total_chunks
 
-    def _send_feishu_message(self, content: str, *, timeout_seconds: Optional[float] = None) -> bool:
-        """Send a single Feishu webhook message (interactive card, fallback text)."""
+    def _send_feishu_message(
+        self,
+        content: str,
+        *,
+        timeout_seconds: Optional[float] = None,
+        mention_all: bool = False,
+    ) -> bool:
+        """Send a single Feishu webhook message (interactive card, fallback text).
+
+        ``mention_all`` 时跳过卡片直接走文本：interactive card 的 lark_md 不渲染
+        ``<at>`` 标签，只有文本消息能正确触发 @所有人。
+        """
         prepared_content = self._apply_keyword_prefix(content)
         security_fields = self._build_security_fields()
 
@@ -593,13 +643,16 @@ class FeishuSender:
             logger.error("飞书 Webhook 请求失败: HTTP %d", response.status_code)
             return False
 
+        text_payload = {
+            "msg_type": "text",
+            "content": {"text": prepared_content},
+        }
+        if mention_all:
+            return _post_payload(text_payload)
+
         card_payload = {"msg_type": "interactive", "card": self._build_card_body(prepared_content)}
 
         if _post_payload(card_payload):
             return True
 
-        text_payload = {
-            "msg_type": "text",
-            "content": {"text": prepared_content},
-        }
         return _post_payload(text_payload)
